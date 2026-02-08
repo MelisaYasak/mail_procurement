@@ -1,5 +1,3 @@
-# multiagent_procurement_langchain.py
-
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
@@ -8,19 +6,11 @@ from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import JsonOutputParser
 
 
-# =========================
-# LLM
-# =========================
-
 llm = ChatOllama(
     model="qwen2.5:3b",
     temperature=0
 )
 
-
-# =========================
-# MODELLER
-# =========================
 
 @dataclass
 class PurchaseRequest:
@@ -42,11 +32,8 @@ class EvaluationResult:
     status: str
     reason: str | None
     order: Dict[str, Any] | None
+    approval_email: Dict[str, Any] | None = None  # 👈 BURAYI EKLE
 
-
-# =========================
-# EMAIL AGENT (LLM)
-# =========================
 
 email_prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -72,11 +59,6 @@ def email_agent(email_text: str) -> PurchaseRequest:
         quantity=int(data["quantity"]),
         budget=float(data["budget"])
     )
-
-
-# =========================
-# SUPPLIER AGENT (LLM)
-# =========================
 
 
 supplier_prompt = ChatPromptTemplate.from_messages([
@@ -120,27 +102,79 @@ def supplier_agent(request: PurchaseRequest) -> Supplier:
     )
 
 
-# =========================
-# COMPLIANCE AGENT (RULE-BASED)
-# =========================
-
-def compliance_agent(supplier: Supplier, request: PurchaseRequest) -> bool:
+def compliance_agent(supplier: Supplier, request: PurchaseRequest) -> tuple[bool, str]:
     print("📋 ComplianceAgent çalıştı")
 
     total_cost = supplier.price_per_unit * request.quantity
 
     if not supplier.compliant:
-        return False
+        return False, "Supplier is not compliant"
 
     if total_cost > request.budget:
-        return False
+        return False, f"Budget exceeded: {total_cost} > {request.budget}"
 
-    return True
+    return True, ""  # 👈 BU SATIR VAR MI?
 
 
-# =========================
-# ORDER AGENT
-# =========================
+approval_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are an approval request generator. "
+     "Create a professional email to request manager approval for a purchase. "
+     "Return ONLY valid JSON with keys: subject, body, manager_email.\n"
+     "Example:\n"
+     "{{\n"
+     '  "subject": "Approval Required: Laptop Purchase",\n'
+     '  "body": "Dear Manager, ...",\n'
+     '  "manager_email": "melisaayasak@gmail.com"\n'
+     "}}"),
+    ("human",
+     "Item: {item}\n"
+     "Quantity: {quantity}\n"
+     "Supplier: {supplier}\n"
+     "Unit Price: {price}\n"
+     "Total Cost: {total}\n"
+     "Budget: {budget}\n"
+     "Reason: {reason}")
+])
+
+approval_parser = JsonOutputParser()
+
+
+def approval_agent(request: PurchaseRequest, supplier: Supplier, reason: str) -> Dict[str, Any]:
+    print("📧 ApprovalAgent (LLM) çalıştı - Manager'a mail hazırlanıyor")
+
+    total = supplier.price_per_unit * request.quantity
+
+    chain = approval_prompt | llm | approval_parser
+    email_data = chain.invoke({
+        "item": request.item,
+        "quantity": request.quantity,
+        "supplier": supplier.name,
+        "price": supplier.price_per_unit,
+        "total": total,
+        "budget": request.budget,
+        "reason": reason
+    })
+
+    return email_data
+
+
+def simulate_manager_approval() -> bool:
+    """
+    Gerçek sistemde manager'dan cevap bekler
+    Şimdilik simüle ediyoruz
+    """
+    import random
+    # %70 ihtimalle onaylansın
+    approved = random.random() < 0.7
+
+    if approved:
+        print("   ✅ Manager onayladı (simulated)")
+    else:
+        print("   ❌ Manager reddetti (simulated)")
+
+    return approved
+
 
 def order_agent(supplier: Supplier, request: PurchaseRequest) -> Dict[str, Any]:
     print("🧾 OrderAgent çalıştı")
@@ -154,10 +188,6 @@ def order_agent(supplier: Supplier, request: PurchaseRequest) -> Dict[str, Any]:
     }
 
 
-# =========================
-# ORCHESTRATOR (BATCH)
-# =========================
-
 def orchestrator_batch(emails: List[str]) -> List[EvaluationResult]:
     results = []
 
@@ -170,15 +200,36 @@ def orchestrator_batch(emails: List[str]) -> List[EvaluationResult]:
             request = email_agent(email)
             supplier = supplier_agent(request)
 
-            if not compliance_agent(supplier, request):
-                results.append(EvaluationResult(
-                    email_id=idx,
-                    status="REJECTED",
-                    reason="Compliance or budget violation",
-                    order=None
-                ))
-                print("❌ Reddedildi")
-                continue
+            # 3️⃣ Compliance kontrolü
+            is_compliant, compliance_reason = compliance_agent(
+                supplier, request)
+
+            # 4️⃣ Eğer compliance fail → Approval gerekli
+            if not is_compliant:
+                print(f"⚠️  Compliance Issue: {compliance_reason}")
+                print("📧 Approval süreci başlatılıyor...")
+
+                # Approval maili oluştur
+                approval_email = approval_agent(
+                    request, supplier, compliance_reason)
+
+                # Manager'dan onay bekle (simulated)
+                manager_approved = simulate_manager_approval()
+
+                if not manager_approved:
+                    # Manager reddetti
+                    results.append(EvaluationResult(
+                        email_id=idx,
+                        status="REJECTED_BY_MANAGER",
+                        reason="Manager did not approve the request",
+                        order=None,
+                        approval_email=approval_email
+                    ))
+                    print("❌ Manager tarafından reddedildi")
+                    continue
+
+                # Manager onayladı, devam et
+                print("✅ Manager onayı alındı, sipariş veriliyor...")
 
             order = order_agent(supplier, request)
 
@@ -202,24 +253,48 @@ def orchestrator_batch(emails: List[str]) -> List[EvaluationResult]:
     return results
 
 
-# =========================
-# EVALUATION
-# =========================
-
 def evaluate_results(results: List[EvaluationResult]):
-    print("\n📊 TOPLU DEĞERLENDİRME\n")
+    print("\n" + "="*60)
+    print("📊 TOPLU DEĞERLENDİRME")
+    print("="*60 + "\n")
+
+    success_count = 0
+    rejected_count = 0
+    error_count = 0
+    approval_count = 0
 
     for r in results:
-        print(f"Email #{r.email_id} → {r.status}")
+        print(f"📧 Email #{r.email_id} → {r.status}")
+
         if r.reason:
-            print("  Sebep:", r.reason)
+            print(f"   💬 Sebep: {r.reason}")
+
+        if r.approval_email:
+            approval_count += 1
+            print(
+                f"   📬 Approval Mail: {r.approval_email.get('subject', 'N/A')}")
+
         if r.order:
-            print("  Order:", r.order)
+            print(f"   📦 Order: {r.order}")
 
+        print()
 
-# =========================
-# ENTRY POINT
-# =========================
+        # Count
+        if r.status == "SUCCESS":
+            success_count += 1
+        elif "REJECTED" in r.status:
+            rejected_count += 1
+        elif r.status == "ERROR":
+            error_count += 1
+
+    print("="*60)
+    print(f"✅ Başarılı: {success_count}")
+    print(f"❌ Reddedilen: {rejected_count}")
+    print(f"📧 Approval gerekti: {approval_count}")
+    print(f"🔥 Hata: {error_count}")
+    print(f"📊 Toplam: {len(results)}")
+    print("="*60)
+
 
 if __name__ == "__main__":
 
@@ -228,7 +303,7 @@ if __name__ == "__main__":
         "5 adet laptop satın alınmasını rica ediyorum. Bütçe 50000 TL.",
         "10 adet telefon alınacak. Bütçe 30000 TL.",
         "3 adet monitör gerekli. Bütçe 15000 TL.",
-        
+
         # ❌ Başarısız örnekler
         "100 adet iPhone 15 Pro alınacak. Bütçe sadece 5000 TL.",
         "50 adet sunucu istiyoruz. Bütçe 10000 TL.",
@@ -236,6 +311,6 @@ if __name__ == "__main__":
     ]
 
     print(f"📧 Toplam email sayısı: {len(incoming_emails)}")  # Bu 6 göstermeli
-    
+
     results = orchestrator_batch(incoming_emails)
     evaluate_results(results)
