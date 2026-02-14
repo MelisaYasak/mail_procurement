@@ -37,7 +37,7 @@ Bu proje, IBM watsonx Orchestrate'in AI destekli tedarik (procurement) sürecini
    │(LLM) │ │Agent │ │ce    │ │Agent │ │      │
    └──────┘ └──────┘ └──────┘ └──────┘ └──────┘
 ```
-```
+
 
 **Neden Cooperative?**
 - ✅ Tüm agentlar ortak hedefe çalışır: satın alma sürecini tamamlamak
@@ -49,7 +49,6 @@ Bu proje, IBM watsonx Orchestrate'in AI destekli tedarik (procurement) sürecini
 - 🎯 Belirli bir iş akışı sırası ve dependency zinciri vardır
 - 🎯 Her agent kendi sorumluluğuna odaklanır
 
----
 
 ---
 
@@ -87,8 +86,6 @@ Bu proje, IBM watsonx Orchestrate'in AI destekli tedarik (procurement) sürecini
        └─> Order Agent → ORDER_PLACED ✅
 ```
 
----
-
 ## ✨ Özellikler
 
 - ✅ **Multi-Agent System** — 5 otonom agent
@@ -112,8 +109,6 @@ multiagent-procurement/
 ├── procurement.py                   # Batch processing versiyonu (legacy)
 └── README.md
 ```
-
----
 
 ## 🚀 Kurulum
 
@@ -150,8 +145,6 @@ streamlit run streamlit_procurement_orch.py
 # veya batch processing versiyonu
 python procurement.py
 ```
-
----
 
 ## 🖥️ Kullanım
 
@@ -201,8 +194,6 @@ context = orchestrator.resume_workflow(context, {'selected_supplier': supplier})
 # Özet al
 summary = orchestrator.get_execution_summary(context)
 ```
-
----
 
 ## 📊 Multi-Agent System Avantajları
 
