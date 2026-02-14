@@ -1,182 +1,250 @@
-# 🤖 Multi-Agent Procurement System
+# 🏢 Greypine Procurement Assistant
 
-Gayrimenkul şirketi satın alma süreçlerini otomatikleştiren LangChain ve Ollama tabanlı çok-ajanlı sistem. E-posta ile gelen satın alma taleplerini otomatik olarak işler, tedarikçi bulur, uygunluk kontrolü yapar ve sipariş oluşturur.
+> IBM watsonx Orchestrate'in AI destekli tedarik sürecini Python ile yeniden uygulayan Multi-Agent System.
+LangChain, Ollama ve Streamlit kullanılarak geliştirilmiştir.
 
-## 📋 Problem
+---
 
-Greypine gibi gayrimenkul şirketlerinde satın alma yöneticileri şu süreçlerle uğraşır:
-- 📧 E-postalardaki satın alma taleplerini inceleme
-- 🏭 Uygun tedarikçileri belirleme
-- 📋 Tedarikçilerin şirket politikalarına uygunluğunu kontrol etme
-- 💰 Bütçe kontrolü ve sipariş finalizasyonu
+## 📋 Proje Hakkında
 
-**Sorun**: Sürekli farklı uygulamalar arasında geçiş yapmak verimsizlik yaratır.
+Bu proje, IBM watsonx Orchestrate'in AI destekli tedarik (procurement) sürecini Python ile yeniden uygular. Birden fazla AI agent'ın bir orchestrator tarafından koordine edildiği bir **Multi-Agent System (MAS)** mimarisine sahiptir. Kullanıcılar email gelen kutusundan başlayarak tedarikçi seçimi, uygunluk kontrolü, onay süreci ve sipariş onayına kadar tüm procurement akışını tek bir web arayüzünden yönetebilir.
 
-**Çözüm**: Çok-ajanlı otomasyon sistemi tüm süreci koordine eder.
+---
 
-## 🏗️ Multi-Agent Mimari
+## 🏗️ Mimari
 
-Bu proje **Cooperative Multiagent System** (İşbirlikçi Çok-Ajanlı Sistem) mimarisini kullanır.
-
-### Sistem Tipi: Cooperative + Hierarchical
 ```
-ORCHESTRATOR (Yönetici)
-    ↓
-Email Agent (LLM) → Supplier Agent (LLM) → Compliance Agent (Rule) → Order Agent (Rule)
-    ↓                    ↓                        ↓                       ↓
-Veri Çıkar          Tedarikçi Bul           Kontrol Et              Sipariş Oluştur
+┌─────────────────────────────────────────────┐
+│           Streamlit Web UI                  │
+│         (streamlit_procurement_v2.py)        │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│        ProcurementOrchestrator              │
+│              (orchestrator.py)              │
+│  - Agent registration                       │
+│  - Workflow execution & coordination        │
+│  - Pause / Resume mekanizması               │
+│  - Error handling & logging                 │
+└──────┬──────┬──────┬──────┬─────────────────┘
+       │      │      │      │
+       ▼      ▼      ▼      ▼
+   ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+   │ 📨   │ │ 🏭   │ │ 📋   │ │ 📧   │ │ 🧾   │
+   │Email │ │Supp  │ │Comp  │ │Appro │ │Order │
+   │Agent │ │lier  │ │lian  │ │val   │ │Agent │
+   │(LLM) │ │Agent │ │ce    │ │Agent │ │      │
+   └──────┘ └──────┘ └──────┘ └──────┘ └──────┘
+```
 ```
 
 **Neden Cooperative?**
-- ✅ Tüm ajanlar ortak hedefe çalışır: Satın alma sürecini tamamlamak
-- ✅ Her ajan bir sonrakine bilgi aktarır
+- ✅ Tüm agentlar ortak hedefe çalışır: satın alma sürecini tamamlamak
+- ✅ Her agent bir sonrakine çıktısını input olarak aktarır
 - ✅ Rekabet yok, sadece koordinasyon var
-- ✅ Bir ajanın başarısı tüm sistemi başarıya götürür
 
-**Hierarchical Özellikler:**
-- 🎯 Orchestrator tüm ajanları koordine eder
-- 🎯 Belirli bir iş akışı sırası vardır
-- 🎯 Her ajan kendi sorumluluğuna odaklanır
+**Neden Hierarchical?**
+- 🎯 Orchestrator tüm agentları merkezi olarak yönetir
+- 🎯 Belirli bir iş akışı sırası ve dependency zinciri vardır
+- 🎯 Her agent kendi sorumluluğuna odaklanır
 
-### 4 Ajan:
+---
 
-**1. Email Agent** (LLM-based)
-- **Görev**: E-postalardan satın alma talebini çıkarır
-- **Teknoloji**: LangChain + Ollama
-- **Çıktı**: `PurchaseRequest(item, quantity, budget)`
+---
 
-**2. Supplier Agent** (LLM-based)
-- **Görev**: Uygun tedarikçi bulur ve fiyat belirler
-- **Özellik**: Gerçekçi piyasa fiyatları tahmin eder
-- **Çıktı**: `Supplier(name, price_per_unit, compliant)`
+## 🤖 Agentlar
 
-**3. Compliance Agent** (Rule-based)
-- **Görev**: Şirket politikası ve bütçe kontrolü yapar
-- **Kontroller**: Tedarikçi uygunluğu, bütçe limiti
-- **Çıktı**: `True/False`
+| Agent | Görev | Teknoloji |
+|-------|-------|-----------|
+| **Email Agent** | Email'den purchase request çıkarır (item, quantity, budget) | LLM (qwen2.5:3b) |
+| **Supplier Agent** | Ürün için tedarikçi listesi oluşturur | Rule-based + Random |
+| **Compliance Agent** | Bütçe ve tedarikçi uygunluğunu kontrol eder | Rule-based |
+| **Approval Agent** | Bütçe aşımında manager'a onay maili oluşturur | LLM (qwen2.5:3b) |
+| **Order Agent** | Onaylanan siparişi tamamlar | Rule-based |
 
-**4. Order Agent** (Rule-based)
-- **Görev**: Onaylanan siparişi oluşturur
-- **Çıktı**: Sipariş detayları
+---
 
-**Orchestrator**: Toplu işlem yapar, hata yönetimi sağlar, sonuçları raporlar
+## 🔄 Workflow Akışı
+
+```
+1. Email Seçimi
+   └─> Orchestrator.execute_workflow()
+       └─> Email Agent → purchase request çıkarır
+       └─> Supplier Agent → 3 tedarikçi bulur
+       └─> PAUSE (kullanıcı tedarikçi seçecek)
+
+2. Tedarikçi Seçimi
+   └─> Orchestrator.resume_workflow({selected_supplier})
+       └─> Compliance Agent → bütçe & uygunluk kontrolü
+       └─> BUDGET OK → Order Agent → ORDER_PLACED ✅
+       └─> BUDGET EXCEEDED:
+           └─> Approval Agent → LLM ile manager maili oluşturur
+           └─> PAUSE (manager onayı bekleniyor)
+
+3. Manager Onayı (gerekirse)
+   └─> Orchestrator.resume_workflow({manager_approved: True})
+       └─> Order Agent → ORDER_PLACED ✅
+```
+
+---
 
 ## ✨ Özellikler
 
-- 📧 E-postalardan otomatik satın alma talebi çıkarma
-- 🏭 Tedarikçi bulma ve fiyat belirleme
-- 📋 Uygunluk ve bütçe kontrolü
-- 🧾 Otomatik sipariş oluşturma
-- 🔄 Toplu (batch) işlem desteği
-- 🤖 Yerel LLM kullanımı (Ollama)
-- ⚡ Manuel müdahale olmadan hızlı ve doğru işlem
+- ✅ **Multi-Agent System** — 5 otonom agent
+- ✅ **IBM tarzı Orchestrator** — workflow koordinasyonu, pause/resume, error handling
+- ✅ **Streamlit Web UI** — adım adım interaktif arayüz
+- ✅ **Approval Flow** — bütçe aşımında LLM ile otomatik onay maili
+- ✅ **Email Editing** — onay mailini göndermeden önce düzenleme
+- ✅ **Reminder Scheduling** — otomatik hatırlatma zamanlaması
+- ✅ **Process History** — tüm işlemlerin timeline log'u
+- ✅ **Orchestrator Monitoring** — sidebar'da real-time execution takibi
+
+---
+
+## 📁 Dosya Yapısı
+
+```
+multiagent-procurement/
+│
+├── orchestrator.py                  # ProcurementOrchestrator class
+├── streamlit_procurement_orch.py      # Ana Streamlit uygulaması
+├── procurement.py                   # Batch processing versiyonu (legacy)
+└── README.md
+```
+
+---
 
 ## 🚀 Kurulum
 
 ### Gereksinimler
+- Python 3.11+
+- [Ollama](https://ollama.ai) (lokal LLM için)
+- uv (paket yöneticisi)
 
-- Python 3.10+
-- Ollama (yerel LLM için - Bunun dışında API key ile istenilen GPT modeline bağlanılabilir)
-- uv veya pip (paket yöneticisi)
+### 1. Ollama Kurulumu ve Model İndirme
 
-### 1. UV ile (Önerilen)
 ```bash
-# UV kur
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Ollama kur (https://ollama.ai)
+ollama pull qwen2.5:3b
+```
 
-# Proje dizinine git
+### 2. Proje Kurulumu
+
+```bash
+# git clone ile Repoyu klonla
 cd multiagent-procurement
 
-# Sanal ortam oluştur ve aktif et
+# uv ile ortam oluştur ve bağımlılıkları yükle
 uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# Bağımlılıkları yükle
-uv pip install -r requirements.txt
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+uv add streamlit langchain-ollama langchain-core
 ```
 
-### 2. Ollama Kurulumu
+### 3. Uygulamayı Çalıştır
+
 ```bash
-# Ollama indir ve kur
-# https://ollama.ai
+# Streamlit uygulaması (önerilen)
+streamlit run streamlit_procurement_orch.py
 
-# Model indir
-ollama pull <Model Name>
+# veya batch processing versiyonu
+python procurement.py
 ```
 
-## 💻 Kullanım
-```bash
-python multiagent_procurement_langchain.py
-```
+---
 
+## 🖥️ Kullanım
 
-## 🔄 Sistem Akışı
+1. **Email Inbox** — "Read and classify unread emails" butonuna tıkla
+2. **Email Seç** — Procurement request emailini seç (Orchestrator otomatik başlar)
+3. **Tedarikçi Seç** — Orchestrator'ın bulduğu 3 tedarikçiden birini seç
+4. **Compliance** — Otomatik kontrol yapılır
+   - ✅ Bütçe OK → Direkt siparişe geç
+   - ⚠️ Bütçe aşımı → Approval flow başlar
+5. **Approval (gerekirse)** — Maili düzenle, gönder, reminder ayarla, manager kararını simüle et
+6. **Order** — Sipariş özeti ve execution summary görüntülenir
 
-1. **E-posta Girişi**: Satın alma talepleri batch olarak sisteme gelir
-2. **Email Agent**: LLM ile yapılandırılmış veri çıkarımı (`item`, `quantity`, `budget`)
-3. **Supplier Agent**: LLM ile tedarikçi ve fiyat belirleme
-4. **Compliance Check**: Kural tabanlı kontrol
-   - ❌ Tedarikçi uygunsuz veya bütçe aşımı → `REJECTED`
-   - ✅ Her şey uygun → Sipariş oluştur
-5. **Order Agent**: Sipariş detaylarını oluştur
-6. **Sonuç**: Başarı/Red/Hata raporu
+## 🛠️ Teknik Detaylar
 
-## 🎯 Kullanım Senaryoları
+### Orchestrator Workflow States
 
-### Senaryo 1: Başarılı Sipariş
 ```python
-incoming_emails = [
-    "5 adet laptop satın alınmasını rica ediyorum. Bütçe 50000 TL."
-]
-# Sonuç: SUCCESS - Laptop siparişi oluşturuldu
+WorkflowStatus.PENDING           # Kullanıcı kararı bekleniyor
+WorkflowStatus.IN_PROGRESS       # Agent çalışıyor
+WorkflowStatus.REQUIRES_APPROVAL # Manager onayı bekleniyor
+WorkflowStatus.SUCCESS           # Tamamlandı
+WorkflowStatus.FAILED            # Hata oluştu
 ```
 
-### Senaryo 2: Bütçe Aşımı
+### Agent Wrapper Yapısı
+
 ```python
-incoming_emails = [
-    "100 adet iPhone 15 Pro alınacak. Bütçe sadece 5000 TL."
-]
-# Sonuç: REJECTED - Bütçe yetersiz
+def email_agent_wrapper(context: WorkflowContext, **kwargs):
+    result = run_email_agent(context.email_data['body'])
+    add_history("📨 Email Agent", f"Extracted: {result.item}")
+    return result
 ```
 
-### Senaryo 3: Toplu İşlem
+### Orchestrator Kullanımı
+
 ```python
-incoming_emails = [
-    "5 adet laptop satın alınmasını rica ediyorum. Bütçe 50000 TL.",
-    "10 adet telefon alınacak. Bütçe 30000 TL.",
-    "3 adet monitör gerekli. Bütçe 15000 TL."
-]
-# Sonuç: Her email için ayrı değerlendirme
+# Başlat
+orchestrator = ProcurementOrchestrator()
+orchestrator.register_agent('email_agent', email_agent_wrapper)
+
+# Workflow çalıştır
+context = orchestrator.execute_workflow(email_data)
+
+# Devam ettir
+context = orchestrator.resume_workflow(context, {'selected_supplier': supplier})
+
+# Özet al
+summary = orchestrator.get_execution_summary(context)
 ```
 
-## 📊 Multiagent System Avantajları
+---
 
-### Accuracy (Doğruluk)
-Birden fazla ajan çapraz doğrulama yaparak hata oranını azaltır.
+## 📊 Multi-Agent System Avantajları
 
-### Adaptability (Uyum)
-Her ajan gerçek zamanlı geri bildirime göre stratejisini ayarlar.
+**Accuracy (Doğruluk)**
+Her agent kendi uzmanlık alanında çalışır; birden fazla kontrol katmanı hata oranını azaltır.
 
-### Scalability (Ölçeklenebilirlik)
-İş yükü birden fazla ajana dağıtılarak büyük görevler verimli şekilde işlenir.
+**Adaptability (Uyum)**
+Compliance fail olduğunda sistem otomatik olarak approval flow'a geçer; manuel müdahale gerektirmez.
+
+**Scalability (Ölçeklenebilirlik)**
+Yeni bir agent eklemek için sadece `orchestrator.register_agent()` çağrısı yeterlidir; mevcut kod değişmez.
+
+---
 
 ## 🐛 Bilinen Sorunlar
 
 - Küçük LLM modelleri (3b) bazen gerçekçi olmayan fiyatlar üretebilir
-- JSON parsing hataları için güvenli kontroller eklenmiştir
-- LLM çıktıları deterministik değildir, aynı girdi farklı sonuçlar üretebilir
+- LLM çıktıları deterministik değildir; aynı girdi farklı sonuçlar üretebilir
+- JSON parsing hataları için fail-safe kontroller eklenmiştir
+
+---
 
 ## 📚 Kaynaklar
 
 - [LangChain Documentation](https://python.langchain.com/)
 - [Ollama](https://ollama.ai)
+- [Streamlit Documentation](https://docs.streamlit.io)
 - [UV Package Manager](https://github.com/astral-sh/uv)
-- [Multiagent Systems - IBM](https://www.ibm.com/think/topics/multiagent-system)
+- [IBM watsonx Orchestrate](https://www.ibm.com/products/watsonx-orchestrate)
+- [Multiagent Systems — IBM](https://www.ibm.com/think/topics/multiagent-system)
+
+---
 
 ## 🤝 Katkıda Bulunma
 
 1. Fork yapın
-2. Feature branch oluşturun (`git checkout -b feature/amazing`)
+2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
 3. Commit yapın (`git commit -m 'Add amazing feature'`)
-4. Push edin (`git push origin feature/amazing`)
+4. Push edin (`git push origin feature/amazing-feature`)
 5. Pull Request açın
+---
+
+## 🙏 Teşekkür
+
+Bu proje [IBM watsonx Orchestrate](https://www.ibm.com/products/watsonx-orchestrate) procurement demo'sundan ilham alınarak geliştirilmiştir.
